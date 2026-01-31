@@ -5,7 +5,8 @@ import json
 import curl_cffi
 from typing import List, Dict, Any
 from datetime import datetime
-from enum import Enum
+import threading
+from queue import Queue
 
 
 class Color:
@@ -20,6 +21,8 @@ class Color:
     WHITE = "\033[37m"
     BOLD = "\033[1m"
     UNDERLINE = "\033[4m"
+    BRIGHT_BLUE = "\033[94m"
+    BRIGHT_CYAN = "\033[96m"
 
 
 class Printer:
@@ -29,11 +32,11 @@ class Printer:
     
     @staticmethod
     def success(text: str):
-        Printer.print_color(f"[+] {text}", Color.GREEN)
+        Printer.print_color(f"[✓] {text}", Color.GREEN)
     
     @staticmethod
     def error(text: str):
-        Printer.print_color(f"[-] {text}", Color.RED)
+        Printer.print_color(f"[✗] {text}", Color.RED)
     
     @staticmethod
     def warning(text: str):
@@ -41,7 +44,11 @@ class Printer:
     
     @staticmethod
     def info(text: str):
-        Printer.print_color(f"[i] {text}", Color.CYAN)
+        Printer.print_color(f"[i] {text}", Color.BRIGHT_CYAN)
+    
+    @staticmethod
+    def system(text: str):
+        Printer.print_color(f"[●] {text}", Color.BRIGHT_BLUE)
 
 
 class UIHelper:
@@ -50,38 +57,46 @@ class UIHelper:
         os.system('cls' if os.name == 'nt' else 'clear')
     
     @staticmethod
-    def print_line(char: str = "─", length: int = 60, color: str = Color.BLUE):
-        Printer.print_color(char * length, color)
-    
-    @staticmethod
-    def print_double_line(length: int = 60, color: str = Color.MAGENTA):
-        Printer.print_color("═" * length, color)
+    def print_gradient_line(length: int = 64):
+        chars = "▁▂▃▄▅▆▇█▇▆▅▄▃▂▁"
+        line = ""
+        for i in range(length):
+            line += chars[i % len(chars)]
+        Printer.print_color(line, Color.BRIGHT_BLUE)
     
     @staticmethod
     def print_header(text: str):
-        UIHelper.print_double_line()
-        print(f"{Color.BOLD}{Color.MAGENTA}{text.center(60)}{Color.RESET}")
-        UIHelper.print_double_line()
+        UIHelper.print_gradient_line(64)
+        print(f"{Color.BOLD}{Color.BRIGHT_CYAN}{text.center(64)}{Color.RESET}")
+        UIHelper.print_gradient_line(64)
     
     @staticmethod
     def get_input(prompt: str, default: str = "") -> str:
-        Printer.print_color(f"{prompt}: ", Color.YELLOW, end="")
+        Printer.print_color(f"{Color.BRIGHT_CYAN}{prompt}: {Color.RESET}", Color.YELLOW, end="")
         result = input().strip()
         return result if result else default
     
     @staticmethod
-    def print_box(title: str, content: List[str], border_color: str = Color.CYAN):
-        width = 60
-        print()
-        Printer.print_color("┌" + "─" * (width - 2) + "┐", border_color)
-        Printer.print_color(f"│ {title.center(width - 4)} │", border_color)
-        Printer.print_color("├" + "─" * (width - 2) + "┤", border_color)
+    def print_card(title: str, content: List[str]):
+        width = 62
+        print(f"\n{Color.BRIGHT_BLUE}┌{'─' * (width - 2)}┐{Color.RESET}")
+        print(f"{Color.BRIGHT_BLUE}│{Color.BRIGHT_CYAN}{title.center(width - 2)}{Color.BRIGHT_BLUE}│{Color.RESET}")
+        print(f"{Color.BRIGHT_BLUE}├{'─' * (width - 2)}┤{Color.RESET}")
         for line in content:
             if line.strip():
-                Printer.print_color(f"│ {line.ljust(width - 4)} │", border_color)
+                print(f"{Color.BRIGHT_BLUE}│{Color.RESET} {line.ljust(width - 4)} {Color.BRIGHT_BLUE}│{Color.RESET}")
             else:
-                Printer.print_color(f"│{' ' * (width - 2)}│", border_color)
-        Printer.print_color("└" + "─" * (width - 2) + "┘", border_color)
+                print(f"{Color.BRIGHT_BLUE}│{' ' * (width - 2)}│{Color.RESET}")
+        print(f"{Color.BRIGHT_BLUE}└{'─' * (width - 2)}┘{Color.RESET}")
+    
+    @staticmethod
+    def loading_animation(text: str = "Загрузка"):
+        chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        for i in range(10):
+            sys.stdout.write(f"\r{Color.BRIGHT_CYAN}{chars[i % len(chars)]}{Color.RESET} {text}")
+            sys.stdout.flush()
+            time.sleep(0.1)
+        sys.stdout.write("\r" + " " * 30 + "\r")
 
 
 class PlayerOkAPI:
@@ -166,12 +181,11 @@ class Account:
                 response = self._curl_session.post(url, json=data, headers=default_headers)
             
             if response.status_code != 200:
-                raise APIException(f"HTTP {response.status_code}: {response.text}", response.status_code)
+                raise APIException(f"HTTP {response.status_code}", response.status_code)
             
             return response.json()
-            
         except Exception as e:
-            raise APIException(f"Ошибка запроса: {str(e)}")
+            raise APIException(str(e))
 
     def get(self):
         headers = {"accept": "*/*"}
@@ -215,11 +229,11 @@ class Account:
         
         if "errors" in response:
             error_msg = response["errors"][0]["message"]
-            raise APIException(f"Ошибка API: {error_msg}")
+            raise APIException(error_msg)
         
         data = response.get("data", {}).get("viewer")
         if not data:
-            raise APIException("Не удалось получить данные аккаунта")
+            raise APIException("Нет данных аккаунта")
         
         self.id = data.get("id")
         self.username = data.get("username")
@@ -248,13 +262,11 @@ class TokenManager:
     def load_tokens(filename: str = "tokens.txt") -> List[str]:
         if not os.path.exists(filename):
             return []
-        
         try:
             with open(filename, "r", encoding="utf-8") as f:
                 tokens = [line.strip() for line in f if line.strip() and not line.startswith("#")]
             return tokens
-        except Exception as e:
-            Printer.error(f"Ошибка чтения файла: {e}")
+        except:
             return []
     
     @staticmethod
@@ -262,16 +274,46 @@ class TokenManager:
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(tokens, f, ensure_ascii=False, indent=2)
-            Printer.success(f"Валидные токены сохранены в {filename}")
-        except Exception as e:
-            Printer.error(f"Ошибка сохранения: {e}")
+            return True
+        except:
+            return False
     
     @staticmethod
     def format_balance(balance: float) -> str:
         try:
             return f"{balance:,.2f} ₽".replace(",", " ")
-        except Exception:
-            return "Неизвестно"
+        except:
+            return "0.00 ₽"
+
+
+class TokenChecker:
+    def __init__(self, tokens: List[str], results_queue: Queue, thread_id: int):
+        self.tokens = tokens
+        self.results_queue = results_queue
+        self.thread_id = thread_id
+    
+    def run(self):
+        for token in self.tokens:
+            try:
+                account = Account(token, timeout=7)
+                account.get()
+                balance = TokenManager.format_balance(account.balance)
+                
+                self.results_queue.put({
+                    'type': 'valid',
+                    'token': token[:10] + "...",
+                    'username': account.username,
+                    'balance': balance,
+                    'email': account.email or 'Не указан',
+                    'status': 'АКТИВЕН' if not account.is_blocked else 'ЗАБЛОКИРОВАН',
+                    'thread': self.thread_id
+                })
+            except:
+                self.results_queue.put({
+                    'type': 'invalid',
+                    'token': token[:10] + "...",
+                    'thread': self.thread_id
+                })
 
 
 class PlayerOkChecker:
@@ -280,43 +322,44 @@ class PlayerOkChecker:
             'checked': 0,
             'valid': 0,
             'invalid': 0,
-            'start_time': None
+            'start_time': None,
+            'total_balance': 0.0
         }
     
     def show_banner(self):
         UIHelper.clear_screen()
-        print(Color.BOLD + Color.MAGENTA)
-        print("╔══════════════════════════════════════════════════════════╗")
-        print("║                                                          ║")
-        print("║               PLAYEROK TOKEN CHECKER                     ║")
-        print("║                   Версия 2.1                             ║")
-        print("║                                                          ║")
-        print("╚══════════════════════════════════════════════════════════╝")
+        print(f"{Color.BRIGHT_BLUE}{Color.BOLD}")
+        print("╔══════════════════════════════════════════════════════════════╗")
+        print("║                                                              ║")
+        print("║                PLAYEROK TOKEN CHECKER PRO                    ║")
+        print("║                     Версия 3.0                               ║")
+        print("║                                                              ║")
+        print("╚══════════════════════════════════════════════════════════════╝")
         print(Color.RESET)
-        print(Color.CYAN)
-        print("         Встроенный API PlayerOk")
-        print("         Разработано ZLF Team")
-        print("         Портфолио: https://zlafik1.github.io/zlafikbio/")
+        print(f"{Color.BRIGHT_CYAN}")
+        print("           Автоматизированная система проверки")
+        print("           Оптимизированная многопоточная архитектура")
+        print("           Разработано qitq0")
         print(Color.RESET)
-        UIHelper.print_line("─", 60, Color.BLUE)
-        print(f"{Color.YELLOW}         Текущее время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}{Color.RESET}")
-        UIHelper.print_line("─", 60, Color.BLUE)
+        UIHelper.print_gradient_line(64)
+        print(f"{Color.BRIGHT_CYAN}           Текущее время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}{Color.RESET}")
+        UIHelper.print_gradient_line(64)
         print()
     
     def check_single_token(self):
         self.show_banner()
-        UIHelper.print_header("ПРОВЕРКА ОДНОГО ТОКЕНА")
+        UIHelper.print_header("ПРОВЕРКА ЕДИНИЧНОГО ТОКЕНА")
         
-        token = UIHelper.get_input("Введите токен")
+        token = UIHelper.get_input("Введите токен для проверки")
         if not token:
             Printer.error("Токен не может быть пустым")
-            time.sleep(1.5)
+            time.sleep(1)
             return
         
-        Printer.info("Проверяем токен...")
+        UIHelper.loading_animation("Проверка токена")
         
         try:
-            account = Account(token, timeout=5)
+            account = Account(token, timeout=8)
             account.get()
             
             self.show_banner()
@@ -327,27 +370,28 @@ class PlayerOkChecker:
             status_color = Color.GREEN if not account.is_blocked else Color.RED
             
             info = [
-                f"Никнейм:      {account.username}",
-                f"Баланс:       {balance}",
-                f"Email:        {account.email or 'Не указан'}",
-                f"Статус:       {status_color}{status}{Color.RESET}",
-                f"ID:           {account.id or 'Неизвестно'}",
-                f"Дата проверки: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"Никнейм:       {account.username}",
+                f"Баланс:        {balance}",
+                f"Email:         {account.email or 'Не указан'}",
+                f"Статус:        {status_color}{status}{Color.RESET}",
+                f"ID аккаунта:   {account.id or 'Неизвестно'}",
+                f"Проверено:     {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             ]
             
-            UIHelper.print_box("ИНФОРМАЦИЯ О АККАУНТЕ", info)
+            UIHelper.print_card("ИНФОРМАЦИЯ О АККАУНТЕ", info)
             
             self.stats['checked'] += 1
             self.stats['valid'] += 1
+            self.stats['total_balance'] += account.balance
             
         except APIException as e:
             UIHelper.print_header("РЕЗУЛЬТАТ ПРОВЕРКИ")
-            Printer.error(f"Токен невалидный: {str(e)}")
+            Printer.error(f"Токен невалидный: {e.message}")
             self.stats['checked'] += 1
             self.stats['invalid'] += 1
         except Exception as e:
             UIHelper.print_header("РЕЗУЛЬТАТ ПРОВЕРКИ")
-            Printer.error(f"Ошибка: {str(e)}")
+            Printer.error(f"Ошибка проверки: {str(e)}")
             self.stats['checked'] += 1
             self.stats['invalid'] += 1
     
@@ -359,146 +403,178 @@ class PlayerOkChecker:
         
         if not tokens:
             Printer.error("Файл tokens.txt не найден или пуст")
-            time.sleep(1.5)
+            time.sleep(1)
             return
         
-        Printer.info(f"Найдено токенов: {len(tokens)}")
-        UIHelper.print_line("─", 60, Color.CYAN)
-        print()
+        Printer.system(f"Найдено токенов: {len(tokens)}")
+        UIHelper.print_gradient_line(64)
         
-        valid_tokens = []
-        invalid_tokens = []
+        num_threads = min(8, len(tokens))
+        chunk_size = len(tokens) // num_threads
+        
+        results_queue = Queue()
+        threads = []
         
         self.stats['start_time'] = time.time()
         
-        for i, token in enumerate(tokens, 1):
-            progress = f"[{i}/{len(tokens)}]"
-            token_preview = token[:15] + "..." if len(token) > 15 else token
+        Printer.info("Запуск многопоточной проверки...")
+        
+        for i in range(num_threads):
+            start_idx = i * chunk_size
+            end_idx = start_idx + chunk_size if i < num_threads - 1 else len(tokens)
+            thread_tokens = tokens[start_idx:end_idx]
             
-            print(f"\r{progress} Проверка {token_preview:<25}", end="")
+            checker = TokenChecker(thread_tokens, results_queue, i + 1)
+            thread = threading.Thread(target=checker.run)
+            thread.daemon = True
+            threads.append(thread)
+            thread.start()
+        
+        valid_tokens = []
+        invalid_count = 0
+        processed = 0
+        
+        print(f"\n{Color.BRIGHT_CYAN}Прогресс проверки:{Color.RESET}\n")
+        
+        while processed < len(tokens):
+            result = results_queue.get()
+            processed += 1
             
-            try:
-                account = Account(token, timeout=5)
-                account.get()
-                balance = TokenManager.format_balance(account.balance)
-                
+            progress = (processed / len(tokens)) * 100
+            bar_length = 30
+            filled = int(bar_length * processed // len(tokens))
+            bar = f"{Color.BRIGHT_BLUE}█{Color.GREEN}" * filled + f"{Color.BRIGHT_BLUE}░{Color.RESET}" * (bar_length - filled)
+            
+            sys.stdout.write(f"\r[{bar}] {progress:.1f}% ({processed}/{len(tokens)})")
+            sys.stdout.flush()
+            
+            if result['type'] == 'valid':
                 valid_tokens.append({
-                    'token': token[:10] + "...",
-                    'username': account.username,
-                    'balance': balance,
-                    'email': account.email or 'Не указан',
-                    'status': 'АКТИВЕН' if not account.is_blocked else 'ЗАБЛОКИРОВАН'
+                    'token': result['token'],
+                    'username': result['username'],
+                    'balance': result['balance'],
+                    'email': result['email'],
+                    'status': result['status']
                 })
-                
-                print(f"\r{progress} {token_preview:<25} ", end="")
-                Printer.print_color("ВАЛИДНЫЙ", Color.GREEN)
-                
-            except Exception:
-                invalid_tokens.append(token[:10] + "...")
-                print(f"\r{progress} {token_preview:<25} ", end="")
-                Printer.print_color("НЕВАЛИДНЫЙ", Color.RED)
+            else:
+                invalid_count += 1
+        
+        for thread in threads:
+            thread.join(timeout=2)
         
         elapsed_time = time.time() - self.stats['start_time']
         
+        print("\n")
         UIHelper.print_header("ИТОГИ ПРОВЕРКИ")
         
+        total_balance = sum(float(t['balance'].replace(' ₽', '').replace(' ', '').replace(',', '')) 
+                          for t in valid_tokens if ' ₽' in t['balance'])
+        
         results = [
-            f"Проверено токенов: {len(tokens)}",
-            f"Валидных:          {len(valid_tokens)}",
-            f"Невалидных:        {len(invalid_tokens)}",
-            f"Время выполнения:  {elapsed_time:.2f} сек",
-            f"Скорость проверки: {len(tokens)/elapsed_time:.1f} токенов/сек" if elapsed_time > 0 else ""
+            f"Всего проверено:    {len(tokens)}",
+            f"Валидных токенов:   {len(valid_tokens)}",
+            f"Невалидных токенов: {invalid_count}",
+            f"Общий баланс:       {TokenManager.format_balance(total_balance)}",
+            f"Время выполнения:   {elapsed_time:.2f} сек",
+            f"Скорость проверки:  {len(tokens)/elapsed_time:.1f} токенов/сек" if elapsed_time > 0 else ""
         ]
         
-        UIHelper.print_box("СТАТИСТИКА", results)
+        UIHelper.print_card("СТАТИСТИКА ПРОВЕРКИ", results)
         
         if valid_tokens:
             UIHelper.print_header("ВАЛИДНЫЕ ТОКЕНЫ")
             
             token_list = []
-            for i, token_info in enumerate(valid_tokens[:10], 1):
-                username_display = token_info['username'][:18] + "..." if len(token_info['username']) > 18 else token_info['username']
-                token_list.append(f"{i:2}. {username_display:<22} {token_info['balance']:<15}")
+            for i, token_info in enumerate(valid_tokens[:15], 1):
+                username_display = token_info['username'][:20] + "..." if len(token_info['username']) > 20 else token_info['username']
+                token_list.append(f"{i:2}. {username_display:<23} {token_info['balance']:<12}")
             
-            if len(valid_tokens) > 10:
-                token_list.append(f"... и еще {len(valid_tokens) - 10} токенов")
+            if len(valid_tokens) > 15:
+                token_list.append(f"... и еще {len(valid_tokens) - 15} токенов")
             
-            UIHelper.print_box("СПИСОК", token_list)
+            UIHelper.print_card("СПИСОК АККАУНТОВ", token_list)
             
-            save_choice = UIHelper.get_input("\nСохранить валидные токены в файл? (y/n)", "n")
+            save_choice = UIHelper.get_input("\nСохранить результаты в файл? (y/n)", "n")
             if save_choice.lower() == 'y':
-                TokenManager.save_valid_tokens(valid_tokens)
-                Printer.success("Токены успешно сохранены!")
+                if TokenManager.save_valid_tokens(valid_tokens):
+                    Printer.success("Результаты успешно сохранены в valid_tokens.json")
+                else:
+                    Printer.error("Ошибка сохранения файла")
         
         self.stats['checked'] += len(tokens)
         self.stats['valid'] += len(valid_tokens)
-        self.stats['invalid'] += len(invalid_tokens)
+        self.stats['invalid'] += invalid_count
+        self.stats['total_balance'] += total_balance
     
     def show_help(self):
         self.show_banner()
         UIHelper.print_header("СПРАВКА И ИНСТРУКЦИИ")
         
         help_content = [
-            "КАК ПОЛУЧИТЬ ТОКЕН:",
+            "ПОЛУЧЕНИЕ ТОКЕНА:",
             "1. Установите расширение Cookie Editor",
-            "2. Зайдите на playerok.com и авторизуйтесь",
+            "2. Авторизуйтесь на playerok.com",
             "3. Откройте Cookie Editor",
-            "4. Найдите сайт playerok.com в списке",
-            "5. Найдите куку с названием 'token'",
-            "6. Скопируйте значение токена",
+            "4. Найдите куку 'token' для playerok.com",
+            "5. Скопируйте значение токена",
             "",
             "МАССОВАЯ ПРОВЕРКА:",
-            "Создайте файл tokens.txt",
-            "Каждый токен на новой строке",
+            "Создайте файл tokens.txt в папке с программой",
+            "Каждый токен на отдельной строке",
             "Комментарии начинаются с #",
-            "Сохраните в папке с программой",
             "",
-            "ПРИМЕР ФАЙЛА tokens.txt:",
-            "# Это комментарий",
-            "ваш_токен_1_здесь",
-            "ваш_токен_2_здесь",
+            "ФОРМАТ ФАЙЛА:",
+            "# Комментарий",
+            "ваш_токен_1",
+            "ваш_токен_2",
             "# Еще один токен",
-            "ваш_токен_3_здесь",
+            "ваш_токен_3",
             "",
-            "СТАТИСТИКА ПРОГРАММЫ:",
+            "СТАТИСТИКА:",
             f"Проверено: {self.stats['checked']}",
             f"Валидных: {self.stats['valid']}",
             f"Невалидных: {self.stats['invalid']}",
+            f"Общий баланс: {TokenManager.format_balance(self.stats['total_balance'])}",
             "",
-            "РАЗРАБОТЧИКИ:",
-            "ZLF Team",
-            "Портфолио: zlafik1.github.io/zlafikbio/"
+            "ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ:",
+            "Версия: 3.0",
+            "Архитектура: Многопоточная",
+            "Разработчик: qitq0",
+            "Контакты: @qtiq0"
         ]
         
-        UIHelper.print_box("ИНСТРУКЦИЯ", help_content)
+        UIHelper.print_card("РУКОВОДСТВО ПОЛЬЗОВАТЕЛЯ", help_content)
     
     def show_stats(self):
         self.show_banner()
-        UIHelper.print_header("СТАТИСТИКА ПРОВЕРОК")
+        UIHelper.print_header("СТАТИСТИКА СИСТЕМЫ")
         
         if self.stats['checked'] > 0:
             efficiency = self.stats['valid'] / self.stats['checked'] * 100
         else:
             efficiency = 0
         
+        avg_balance = self.stats['total_balance'] / self.stats['valid'] if self.stats['valid'] > 0 else 0
+        
         stats_content = [
             "ОБЩАЯ СТАТИСТИКА:",
             "",
-            f"Проверено токенов: {self.stats['checked']}",
-            f"Валидных токенов:  {self.stats['valid']}",
-            f"Невалидных токенов: {self.stats['invalid']}",
+            f"Всего проверок:    {self.stats['checked']}",
+            f"Успешных проверок: {self.stats['valid']}",
+            f"Неудачных проверок: {self.stats['invalid']}",
+            f"Эффективность:     {efficiency:.1f}%",
             "",
-            f"Процент валидности: {efficiency:.1f}%",
+            "ФИНАНСОВАЯ СТАТИСТИКА:",
+            f"Общий баланс:      {TokenManager.format_balance(self.stats['total_balance'])}",
+            f"Средний баланс:    {TokenManager.format_balance(avg_balance)}",
             "",
-            "ПОСЛЕДНИЕ ДЕЙСТВИЯ:",
-            f"Последняя проверка: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}",
-            "",
-            "ПРОГРАММА:",
-            "PlayerOk Token Checker v2.3",
-            "Разработано ZLF Team"
+            "СИСТЕМНАЯ ИНФОРМАЦИЯ:",
+            f"Последняя активность: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}",
+            f"Версия программы: 3.0 Pro",
+            f"Разработчик: qitq0"
         ]
         
-        UIHelper.print_box("СТАТИСТИЧЕСКИЕ ДАННЫЕ", stats_content)
+        UIHelper.print_card("АНАЛИТИЧЕСКИЕ ДАННЫЕ", stats_content)
     
     def show_menu(self):
         while True:
@@ -506,75 +582,68 @@ class PlayerOkChecker:
             
             menu_items = [
                 "Проверить один токен",
-                "Проверить несколько токенов",
-                "Справка и инструкции",
-                "Показать статистику",
+                "Массовая проверка токенов",
+                "Справочная информация",
+                "Статистика системы",
                 "Выход из программы"
             ]
             
-            print(Color.BOLD + "ГЛАВНОЕ МЕНЮ" + Color.RESET)
-            UIHelper.print_double_line()
+            print(f"{Color.BOLD}{Color.BRIGHT_CYAN}ОСНОВНОЕ МЕНЮ{Color.RESET}")
+            UIHelper.print_gradient_line()
             
             for i, item in enumerate(menu_items, 1):
-                print(f"  {Color.CYAN}[{i}]{Color.RESET} {item}")
+                print(f"  {Color.BRIGHT_BLUE}[{i}]{Color.RESET} {item}")
             
-            UIHelper.print_double_line()
+            UIHelper.print_gradient_line()
             print()
             
             choice = UIHelper.get_input("Выберите действие (1-5)", "1")
             
             if choice == '1':
                 self.check_single_token()
-                UIHelper.get_input("\nНажмите Enter чтобы продолжить", "")
+                UIHelper.get_input("\nНажмите Enter для продолжения", "")
             elif choice == '2':
                 self.check_multiple_tokens()
-                UIHelper.get_input("\nНажмите Enter чтобы продолжить", "")
+                UIHelper.get_input("\nНажмите Enter для продолжения", "")
             elif choice == '3':
                 self.show_help()
-                UIHelper.get_input("\nНажмите Enter чтобы продолжить", "")
+                UIHelper.get_input("\nНажмите Enter для продолжения", "")
             elif choice == '4':
                 self.show_stats()
-                UIHelper.get_input("\nНажмите Enter чтобы продолжить", "")
+                UIHelper.get_input("\nНажмите Enter для продолжения", "")
             elif choice == '5':
-                Printer.info("Завершение работы программы...")
-                UIHelper.print_double_line()
-                print(f"{Color.BOLD}Спасибо за использование программы!{Color.RESET}")
-                UIHelper.print_double_line()
+                Printer.system("Завершение работы программы...")
+                UIHelper.print_gradient_line()
+                print(f"{Color.BOLD}Спасибо за использование PlayerOk Checker Pro!{Color.RESET}")
+                UIHelper.print_gradient_line()
+                time.sleep(1)
                 break
             else:
-                Printer.error("Неверный выбор. Пожалуйста, введите число от 1 до 5")
-                time.sleep(1.5)
+                Printer.error("Неверный выбор. Введите число от 1 до 5")
+                time.sleep(1)
     
     def run(self):
         try:
             self.show_banner()
-            Printer.info("Инициализация системы...")
             
             try:
                 import curl_cffi
-                Printer.success("Зависимости проверены успешно")
-                Printer.success("Система готова к работе")
+                Printer.success("Системные зависимости проверены")
             except ImportError:
-                Printer.error("Ошибка: Модуль curl-cffi не найден!")
-                Printer.warning("Для работы программы необходимо установить curl-cffi")
-                Printer.info("Установите выполнив команду: pip install curl-cffi")
-                UIHelper.print_line("─", 60, Color.RED)
+                Printer.error("Модуль curl-cffi не установлен")
+                Printer.warning("Установите: pip install curl-cffi")
                 UIHelper.get_input("\nНажмите Enter для выхода", "")
                 return
             
-            time.sleep(1.5)
+            UIHelper.loading_animation("Инициализация системы")
             
             self.show_menu()
             
         except KeyboardInterrupt:
-            print("\n")
-            Printer.warning("Работа программы прервана пользователем")
-            UIHelper.print_line("─", 60, Color.YELLOW)
+            print(f"\n\n{Color.YELLOW}Работа программы прервана{Color.RESET}")
             time.sleep(1)
         except Exception as e:
-            Printer.error(f"Критическая ошибка: {e}")
-            import traceback
-            traceback.print_exc()
+            Printer.error(f"Системная ошибка: {e}")
             UIHelper.get_input("\nНажмите Enter для выхода", "")
 
 
