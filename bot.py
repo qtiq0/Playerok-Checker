@@ -32,11 +32,11 @@ class Printer:
     
     @staticmethod
     def success(text: str):
-        Printer.print_color(f"[✓] {text}", Color.GREEN)
+        Printer.print_color(f"[+] {text}", Color.GREEN)
     
     @staticmethod
     def error(text: str):
-        Printer.print_color(f"[✗] {text}", Color.RED)
+        Printer.print_color(f"[-] {text}", Color.RED)
     
     @staticmethod
     def warning(text: str):
@@ -48,7 +48,7 @@ class Printer:
     
     @staticmethod
     def system(text: str):
-        Printer.print_color(f"[●] {text}", Color.BRIGHT_BLUE)
+        Printer.print_color(f"[*] {text}", Color.BRIGHT_BLUE)
 
 
 class UIHelper:
@@ -57,18 +57,18 @@ class UIHelper:
         os.system('cls' if os.name == 'nt' else 'clear')
     
     @staticmethod
-    def print_gradient_line(length: int = 64):
-        chars = "▁▂▃▄▅▆▇█▇▆▅▄▃▂▁"
-        line = ""
-        for i in range(length):
-            line += chars[i % len(chars)]
-        Printer.print_color(line, Color.BRIGHT_BLUE)
+    def print_line(char: str = "=", length: int = 64, color: str = Color.BRIGHT_BLUE):
+        Printer.print_color(char * length, color)
+    
+    @staticmethod
+    def print_double_line(length: int = 64, color: str = Color.BRIGHT_CYAN):
+        Printer.print_color("=" * length, color)
     
     @staticmethod
     def print_header(text: str):
-        UIHelper.print_gradient_line(64)
+        UIHelper.print_double_line()
         print(f"{Color.BOLD}{Color.BRIGHT_CYAN}{text.center(64)}{Color.RESET}")
-        UIHelper.print_gradient_line(64)
+        UIHelper.print_double_line()
     
     @staticmethod
     def get_input(prompt: str, default: str = "") -> str:
@@ -79,20 +79,20 @@ class UIHelper:
     @staticmethod
     def print_card(title: str, content: List[str]):
         width = 62
-        print(f"\n{Color.BRIGHT_BLUE}┌{'─' * (width - 2)}┐{Color.RESET}")
-        print(f"{Color.BRIGHT_BLUE}│{Color.BRIGHT_CYAN}{title.center(width - 2)}{Color.BRIGHT_BLUE}│{Color.RESET}")
-        print(f"{Color.BRIGHT_BLUE}├{'─' * (width - 2)}┤{Color.RESET}")
+        print(f"\n{Color.BRIGHT_BLUE}+{'-' * (width - 2)}+{Color.RESET}")
+        print(f"{Color.BRIGHT_BLUE}|{Color.BRIGHT_CYAN}{title.center(width - 2)}{Color.BRIGHT_BLUE}|{Color.RESET}")
+        print(f"{Color.BRIGHT_BLUE}+{'-' * (width - 2)}+{Color.RESET}")
         for line in content:
             if line.strip():
-                print(f"{Color.BRIGHT_BLUE}│{Color.RESET} {line.ljust(width - 4)} {Color.BRIGHT_BLUE}│{Color.RESET}")
+                print(f"{Color.BRIGHT_BLUE}|{Color.RESET} {line.ljust(width - 4)} {Color.BRIGHT_BLUE}|{Color.RESET}")
             else:
-                print(f"{Color.BRIGHT_BLUE}│{' ' * (width - 2)}│{Color.RESET}")
-        print(f"{Color.BRIGHT_BLUE}└{'─' * (width - 2)}┘{Color.RESET}")
+                print(f"{Color.BRIGHT_BLUE}|{' ' * (width - 2)}|{Color.RESET}")
+        print(f"{Color.BRIGHT_BLUE}+{'-' * (width - 2)}+{Color.RESET}")
     
     @staticmethod
     def loading_animation(text: str = "Загрузка"):
-        chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        for i in range(10):
+        chars = ["|", "/", "-", "\\"]
+        for i in range(12):
             sys.stdout.write(f"\r{Color.BRIGHT_CYAN}{chars[i % len(chars)]}{Color.RESET} {text}")
             sys.stdout.flush()
             time.sleep(0.1)
@@ -329,21 +329,19 @@ class PlayerOkChecker:
     def show_banner(self):
         UIHelper.clear_screen()
         print(f"{Color.BRIGHT_BLUE}{Color.BOLD}")
-        print("╔══════════════════════════════════════════════════════════════╗")
-        print("║                                                              ║")
-        print("║                PLAYEROK TOKEN CHECKER PRO                    ║")
-        print("║                     Версия 3.0                               ║")
-        print("║                                                              ║")
-        print("╚══════════════════════════════════════════════════════════════╝")
+        print("================================================================")
+        print("                     PLAYEROK TOKEN CHECKER PRO                 ")
+        print("                           Версия 3.0                           ")
+        print("================================================================\n")
         print(Color.RESET)
         print(f"{Color.BRIGHT_CYAN}")
         print("           Автоматизированная система проверки")
         print("           Оптимизированная многопоточная архитектура")
         print("           Разработано qitq0")
         print(Color.RESET)
-        UIHelper.print_gradient_line(64)
+        UIHelper.print_line("=", 64, Color.BRIGHT_BLUE)
         print(f"{Color.BRIGHT_CYAN}           Текущее время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}{Color.RESET}")
-        UIHelper.print_gradient_line(64)
+        UIHelper.print_line("=", 64, Color.BRIGHT_BLUE)
         print()
     
     def check_single_token(self):
@@ -407,7 +405,7 @@ class PlayerOkChecker:
             return
         
         Printer.system(f"Найдено токенов: {len(tokens)}")
-        UIHelper.print_gradient_line(64)
+        UIHelper.print_line("-", 64, Color.BRIGHT_CYAN)
         
         num_threads = min(8, len(tokens))
         chunk_size = len(tokens) // num_threads
@@ -443,7 +441,7 @@ class PlayerOkChecker:
             progress = (processed / len(tokens)) * 100
             bar_length = 30
             filled = int(bar_length * processed // len(tokens))
-            bar = f"{Color.BRIGHT_BLUE}█{Color.GREEN}" * filled + f"{Color.BRIGHT_BLUE}░{Color.RESET}" * (bar_length - filled)
+            bar = f"{Color.BRIGHT_BLUE}#{Color.GREEN}" * filled + f"{Color.BRIGHT_BLUE}.{Color.RESET}" * (bar_length - filled)
             
             sys.stdout.write(f"\r[{bar}] {progress:.1f}% ({processed}/{len(tokens)})")
             sys.stdout.flush()
@@ -589,12 +587,12 @@ class PlayerOkChecker:
             ]
             
             print(f"{Color.BOLD}{Color.BRIGHT_CYAN}ОСНОВНОЕ МЕНЮ{Color.RESET}")
-            UIHelper.print_gradient_line()
+            UIHelper.print_double_line()
             
             for i, item in enumerate(menu_items, 1):
                 print(f"  {Color.BRIGHT_BLUE}[{i}]{Color.RESET} {item}")
             
-            UIHelper.print_gradient_line()
+            UIHelper.print_double_line()
             print()
             
             choice = UIHelper.get_input("Выберите действие (1-5)", "1")
@@ -613,9 +611,9 @@ class PlayerOkChecker:
                 UIHelper.get_input("\nНажмите Enter для продолжения", "")
             elif choice == '5':
                 Printer.system("Завершение работы программы...")
-                UIHelper.print_gradient_line()
+                UIHelper.print_double_line()
                 print(f"{Color.BOLD}Спасибо за использование PlayerOk Checker Pro!{Color.RESET}")
-                UIHelper.print_gradient_line()
+                UIHelper.print_double_line()
                 time.sleep(1)
                 break
             else:
